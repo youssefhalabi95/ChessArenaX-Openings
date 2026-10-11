@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Study and practise chess openings with move-by-move explanations on ChessArenaX.">
+  <title>ChessArenaX | Opening Trainer</title>
+
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --line: #e3e7ee;
+      --bg: #f6f8fb;
+      --gold: #f7d66f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      padding: 20px 18px;
+    }
+
+    .head,
+    .wrap {
+      max-width: 1180px;
+      margin: auto;
+    }
+
+    .brand {
+      font-size: 1.55rem;
+      font-weight: 900;
+    }
+
+    .brand span {
+      color: #b58a13;
+    }
+
+    .tagline {
+      color: var(--muted);
+      margin-top: 5px;
+      font-size: .93rem;
+    }
+
+    .wrap {
+      padding: 24px 16px 40px;
+    }
+
+    .hero {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      font-size: .75rem;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: #94700d;
+      font-weight: 850;
+    }
+
+    h1 {
+      font-size: clamp(1.7rem, 4vw, 2.5rem);
+      margin: 9px 0 10px;
+    }
+
+    .hero p {
+      line-height: 1.65;
+      color: var(--muted);
+      max-width: 780px;
+      margin: 0;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 25px 0 12px;
+    }
+
+    h2 {
+      font-size: 1.25rem;
+      margin: 0;
+    }
+
+    .count {
+      font-size: .82rem;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 13px;
+    }
+
+    .opening {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      padding: 16px;
+      min-height: 170px;
+    }
+
+    .opening h3 {
+      font-size: 1rem;
+      margin: 0;
+    }
+
+    .opening p {
+      color: var(--muted);
+      font-size: .9rem;
+      line-height: 1.5;
+      margin: 0;
+      flex: 1;
+    }
+
+    .opening a {
+      display: inline-block;
+      align-self: flex-start;
+      text-decoration: none;
+      background: var(--gold);
+      color: var(--ink);
+      font-weight: 800;
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+
+    .opening a:hover {
+      filter: brightness(.96);
+    }
+
+    footer {
+      color: var(--muted);
+      font-size: .85rem;
+      margin-top: 28px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 850px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 540px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        padding: 17px;
+      }
+
+      .opening {
+        min-height: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <div class="head">
+    <div class="brand">ChessArena<span>X</span></div>
+    <div class="tagline">
+      Opening Trainer · Learn the ideas, then practise the moves
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="eyebrow">Your opening study room</div>
+    <h1>Learn openings with purpose.</h1>
+
+    <p>
+      Choose an opening, study at least three variations, and read the
+      reasoning behind every move. Switch to Practice Mode whenever you
+      are ready to play the line yourself. In practice, make the moves
+      for the side whose repertoire you are learning.
+    </p>
+  </section>
+
+  <section>
+    <div class="section-title">
+      <h2>White openings</h2>
+      <span class="count">{{ white_openings|length }} openings</span>
+    </div>
+
+    <div class="grid">
+      {% for opening in white_openings %}
+      <article class="opening">
+        <h3>{{ opening.name }}</h3>
+        <p>{{ opening.description }}</p>
+        <a href="{{ url_for('opening_page', slug=opening.slug) }}">
+          Study White →
+        </a>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">
+      <h2>Black openings</h2>
+      <span class="count">{{ black_openings|length }} openings</span>
+    </div>
+
+    <div class="grid">
+      {% for opening in black_openings %}
+      <article class="opening">
+        <h3>{{ opening.name }}</h3>
+        <p>{{ opening.description }}</p>
+        <a href="{{ url_for('opening_page', slug=opening.slug) }}">
+          Study Black →
+        </a>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <footer>
+    ChessArenaX is a study aid. The explanations describe common strategic
+    ideas; evaluate each position carefully rather than memorising moves
+    without understanding them.
+  </footer>
+</main>
+</body>
+</html>
