@@ -1,7 +1,20 @@
-from flask import Flask, render_template, abort
-import re
+
+from flask import Flask, render_template, jsonify, request
+import chess
+import requests
+import json
+import random
 
 app = Flask(__name__)
+
+# IMPORTANT:
+# Paste your COMPLETE existing OPENINGS = [...] list here,
+# unchanged, from your Opening Trainer app.py.
+#
+# Each opening should retain:
+# slug, name, side, description, variations
+# Each variation should retain:
+# name, plan, moves
 
 OPENINGS = [
     {
@@ -467,105 +480,50 @@ OPENINGS = [
 ]
 
 
-def explain_move(san, ply, opening_name, plan):
-    """Explain the likely purpose of each move in the context of the opening."""
+# -------------------------
+# Opening Trainer functions
+# -------------------------
+
+def explain_opening_move(san, ply, opening_name, plan):
+    """Basic move explanation; replace with your original function if preferred."""
+    move_number = (ply + 2) // 2
     side = "White" if ply % 2 == 0 else "Black"
 
-    if san in ("O-O", "O-O-O"):
-        castle = "kingside" if san == "O-O" else "queenside"
-        return (
-            f"{side} castles {castle}: the king moves toward safety and the rook "
-            f"joins the game. This supports the broader plan of {plan.lower()}"
-        )
-
-    check = "+" in san
-    mate = "#" in san
-    capture = "x" in san
-    clean = san.replace("+", "").replace("#", "").replace("!", "").replace("?", "")
-    dest_match = re.search(r"([a-h][1-8])$", clean)
-    destination = dest_match.group(1) if dest_match else None
-
-    piece_char = clean[0] if clean and clean[0] in "KQRBN" else "P"
-    piece_names = {
-        "K": "king",
-        "Q": "queen",
-        "R": "rook",
-        "B": "bishop",
-        "N": "knight",
-        "P": "pawn"
-    }
-    piece = piece_names[piece_char]
-
-    if mate:
-        reason = "delivers checkmate and ends the game"
-    elif check:
-        reason = "gives check, forcing the opponent to answer the immediate king threat"
-    elif capture:
-        reason = "captures material or removes a defender, changing the tactical balance"
-    elif piece_char == "P":
-        if destination in ("e4", "e5", "d4", "d5", "c4", "c5"):
-            reason = (
-                f"occupies or challenges the centre on {destination}, gaining space "
-                "and influencing key squares"
-            )
-        elif destination in ("f4", "f5", "g4", "g5", "h4", "h5"):
-            reason = (
-                f"advances a kingside pawn to gain space or prepare an attacking plan "
-                f"on {destination}"
-            )
-        elif destination in ("a4", "a5", "b4", "b5", "c4", "c5"):
-            reason = (
-                f"uses a queenside pawn to gain space or challenge the opponent's "
-                f"pawn structure on {destination}"
-            )
-        else:
-            reason = (
-                f"advances a pawn to {destination or 'a new square'}, supporting the "
-                "position or preparing a pawn break"
-            )
-    elif piece_char == "N":
-        reason = (
-            f"develops or repositions the knight to {destination or 'an active square'}, "
-            "where it can pressure central squares and support other pieces"
-        )
-    elif piece_char == "B":
-        reason = (
-            f"develops or repositions the bishop to {destination or 'an active diagonal'}, "
-            "improving its influence over long diagonals"
-        )
-    elif piece_char == "R":
-        reason = (
-            f"activates the rook toward {destination or 'an open line'}, "
-            "where it can support files and connected pieces"
-        )
-    elif piece_char == "Q":
-        reason = (
-            f"places the queen on {destination or 'a useful square'}; the idea is to "
-            "support the position without losing time to repeated queen moves"
-        )
-    else:
-        reason = (
-            f"improves the {piece}'s placement toward "
-            f"{destination or 'a safer square'}"
-        )
-
-    extra = f" The move also fits the {opening_name} plan: {plan}"
-    if check:
-        extra += " Keep in mind that a check is useful only if it improves the position."
-
-    return f"{side} {reason}.{extra}"
+    return (
+        f"{side}'s move {san} in the {opening_name}. "
+        f"Follow the plan: {plan} "
+        "Consider the move's effect on development, the center, king safety, "
+        "and the opponent's possible replies."
+    )
 
 
 @app.route("/")
 def home():
-    white_openings = [
-        opening for opening in OPENINGS if opening["side"] == "white"
-    ]
-    black_openings = [
-        opening for opening in OPENINGS if opening["side"] == "black"
-    ]
+    white_openings = [o for o in OPENINGS if o.get("side", "").lower() == "white"]
+    black_openings = [o for o in OPENINGS if o.get("side", "").lower() == "black"]
+
     return render_template(
         "index.html",
+        white_openings=white_openings,
+        black_openings=black_openings,
+        opening_count=len(OPENINGS),
+        variation_count=sum(len(o.get("variations", [])) for o in OPENINGS)
+    )
+
+
+@app.route("/openings")
+def openings_home():
+    white_openings = [
+        o for o in OPENINGS
+        if o.get("side", "").lower() == "white"
+    ]
+    black_openings = [
+        o for o in OPENINGS
+        if o.get("side", "").lower() == "black"
+    ]
+
+    return render_template(
+        "openings.html",
         white_openings=white_openings,
         black_openings=black_openings
     )
@@ -573,45 +531,275 @@ def home():
 
 @app.route("/opening/<slug>")
 def opening_page(slug):
-    opening = next(
-        (item for item in OPENINGS if item["slug"] == slug),
-        None
-    )
+    opening = next((o for o in OPENINGS if o["slug"] == slug), None)
 
     if opening is None:
-        abort(404)
+        return "Opening not found", 404
 
-    page_data = dict(opening)
-    page_data["variations"] = []
+    explained_variations = []
 
-    for variation in opening["variations"]:
-        moves = variation["moves"].split()
-        explained_moves = [
-            {
+    for variation in opening.get("variations", []):
+        moves = variation.get("moves", [])
+        if isinstance(moves, str):
+            moves = moves.split()
+        explained_moves = []
+
+        for ply, san in enumerate(moves):
+            explained_moves.append({
                 "san": san,
-                "explanation": explain_move(
-                    san, index, opening["name"], variation["plan"]
+                "explanation": explain_opening_move(
+                    san,
+                    ply,
+                    opening["name"],
+                    variation.get("plan", opening.get("description", "Develop your pieces."))
                 )
-            }
-            for index, san in enumerate(moves)
-        ]
+            })
 
-        page_data["variations"].append({
-            "name": variation["name"],
-            "plan": variation["plan"],
+        explained_variations.append({
+            **variation,
+            # The browser trainer expects an array of SAN moves, not one string.
             "moves": moves,
             "explained_moves": explained_moves
         })
 
-    return render_template("opening.html", opening=page_data)
+    # opening.html reads its lines from opening.variations, so include
+    # the enriched variations here to restore the move-by-move explanations.
+    opening_for_template = {
+        **opening,
+        "variations": explained_variations
+    }
+
+    return render_template(
+        "opening.html",
+        opening=opening_for_template
+    )
+
+
+# -------------------------
+# Tactics Trainer functions
+# -------------------------
+
+PUZZLE_URL = (
+    "https://raw.githubusercontent.com/"
+    "mcognetta/lichess-combined-puzzle-game-db/"
+    "main/combined_puzzle_db_first_100.ndjson"
+)
+
+PUZZLES = []
+LOAD_ERROR = None
+
+
+def load_puzzles():
+    global PUZZLES, LOAD_ERROR
+
+    try:
+        response = requests.get(PUZZLE_URL, timeout=30)
+        response.raise_for_status()
+
+        valid = []
+
+        for line in response.text.splitlines():
+            try:
+                record = json.loads(line)
+                data = record.get("puzzle", {})
+                original_fen = data.get("FEN")
+                raw_moves = data.get("Moves", "").split()
+
+                if not original_fen or len(raw_moves) < 2:
+                    continue
+
+                board = chess.Board(original_fen)
+
+                # Validate the complete line.
+                for uci in raw_moves:
+                    move = chess.Move.from_uci(uci)
+                    if move not in board.legal_moves:
+                        raise ValueError("Illegal puzzle move")
+                    board.push(move)
+
+                # The FEN is before the opponent's preceding move.
+                start_board = chess.Board(original_fen)
+                first_move = chess.Move.from_uci(raw_moves[0])
+
+                if first_move not in start_board.legal_moves:
+                    continue
+
+                start_board.push(first_move)
+                solution = raw_moves[1:]
+
+                # Validate the solution from the puzzle's start position.
+                check_board = start_board.copy()
+
+                for uci in solution:
+                    move = chess.Move.from_uci(uci)
+                    if move not in check_board.legal_moves:
+                        raise ValueError("Illegal solution move")
+                    check_board.push(move)
+
+                valid.append({
+                    "id": str(data.get("PuzzleId", len(valid) + 1)),
+                    "fen": start_board.fen(),
+                    "moves": solution,
+                    "rating": int(data.get("Rating") or 1200),
+                    "themes": data.get("Themes", ""),
+                    "url": data.get("GameUrl", "")
+                })
+
+            except (ValueError, TypeError, KeyError):
+                continue
+
+        if not valid:
+            raise ValueError("No valid puzzles were loaded.")
+
+        PUZZLES = valid
+        LOAD_ERROR = None
+
+    except Exception as exc:
+        PUZZLES = []
+        LOAD_ERROR = str(exc)
+
+
+def explain_tactics_move(board, move):
+    san = board.san(move)
+    piece = board.piece_at(move.from_square)
+
+    piece_names = {
+        chess.PAWN: "pawn",
+        chess.KNIGHT: "knight",
+        chess.BISHOP: "bishop",
+        chess.ROOK: "rook",
+        chess.QUEEN: "queen",
+        chess.KING: "king"
+    }
+
+    piece_name = piece_names.get(piece.piece_type, "piece") if piece else "piece"
+    parts = []
+
+    if board.is_capture(move):
+        parts.append("captures material")
+    else:
+        parts.append("moves to a new square")
+
+    if board.gives_check(move):
+        parts.append("gives check")
+
+    if move.promotion:
+        parts.append("promotes")
+
+    return (
+        f"{san}: the {piece_name} {', '.join(parts)}. "
+        "Look at the opponent's forcing replies and the threats created."
+    )
+
+
+def puzzle_by_id(puzzle_id):
+    return next((p for p in PUZZLES if p["id"] == puzzle_id), None)
+
+
+@app.route("/tactics")
+def tactics_home():
+    return render_template("tactics.html")
+
+
+@app.route("/api/status")
+def api_status():
+    return jsonify({
+        "count": len(PUZZLES),
+        "error": LOAD_ERROR
+    })
+
+
+@app.route("/api/puzzle")
+def api_puzzle():
+    if not PUZZLES:
+        return jsonify({
+            "error": "The puzzle library is unavailable. Check the server logs and try again."
+        }), 503
+
+    difficulty = request.args.get("difficulty", "all")
+    theme = request.args.get("theme", "all").lower()
+    excluded = set(request.args.get("exclude", "").split(","))
+
+    selected = [p for p in PUZZLES if p["id"] not in excluded]
+
+    if difficulty == "beginner":
+        selected = [p for p in selected if p["rating"] < 1400]
+    elif difficulty == "intermediate":
+        selected = [p for p in selected if 1400 <= p["rating"] < 1900]
+    elif difficulty == "advanced":
+        selected = [p for p in selected if p["rating"] >= 1900]
+
+    theme_aliases = {
+        "fork": ["fork"],
+        "pin": ["pin"],
+        "skewer": ["skewer"],
+        "mate": ["mate"],
+        "discovered": ["discoveredattack", "discovered"],
+        "sacrifice": ["sacrifice"],
+        "endgame": ["endgame"]
+    }
+
+    if theme != "all":
+        terms = theme_aliases.get(theme, [theme])
+        selected = [
+            p for p in selected
+            if any(term in p["themes"].lower().replace(" ", "") for term in terms)
+        ]
+
+    if not selected:
+        return jsonify({
+            "error": "No puzzles match those filters. Try another theme or difficulty."
+        }), 404
+
+    puzzle = random.choice(selected)
+
+    return jsonify({
+        "id": puzzle["id"],
+        "fen": puzzle["fen"],
+        "rating": puzzle["rating"],
+        "themes": puzzle["themes"],
+        "total": len(PUZZLES),
+        "source": puzzle["url"]
+    })
+
+
+@app.route("/api/solution/<puzzle_id>")
+def api_solution(puzzle_id):
+    puzzle = puzzle_by_id(puzzle_id)
+
+    if puzzle is None:
+        return jsonify({"error": "Puzzle not found"}), 404
+
+    board = chess.Board(puzzle["fen"])
+    moves = []
+
+    for uci in puzzle["moves"]:
+        move = chess.Move.from_uci(uci)
+
+        if move not in board.legal_moves:
+            return jsonify({"error": "Puzzle solution failed validation"}), 500
+
+        moves.append({
+            "uci": uci,
+            "san": board.san(move),
+            "color": "white" if board.turn == chess.WHITE else "black",
+            "explanation": explain_tactics_move(board, move)
+        })
+
+        board.push(move)
+
+    return jsonify({"moves": moves})
 
 
 @app.errorhandler(404)
 def not_found(_error):
-    return (
-        "Opening not found. Return to the homepage to choose another opening.",
-        404
-    )
+    # Preserve JSON responses for the API.
+    from flask import jsonify
+    return jsonify({"error": "Page not found"}), 404
+
+
+# Load the puzzle library when the app starts.
+load_puzzles()
 
 
 if __name__ == "__main__":
