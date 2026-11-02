@@ -4,8 +4,26 @@ import chess
 import requests
 import json
 import random
+import os
 
 app = Flask(__name__)
+
+app.config.update(
+        SECRET_KEY=os.environ.get("SECRET_KEY"),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1",
+    )
+if not app.config["SECRET_KEY"]:
+        raise RuntimeError("Set the SECRET_KEY environment variable before starting ChessArenaX.")
+
+from auth_payment import account_bp, init_account_db
+from strategy_room import strategy_bp
+
+app.register_blueprint(account_bp)
+app.register_blueprint(strategy_bp)
+
+init_account_db()
 
 # IMPORTANT:
 # Paste your COMPLETE existing OPENINGS = [...] list here,
@@ -699,6 +717,14 @@ def puzzle_by_id(puzzle_id):
 @app.route("/tactics")
 def tactics_home():
     return render_template("tactics.html")
+
+# ============================================================
+# CHESSARENA X STRATEGY LAB
+# ============================================================
+
+@app.route("/strategy")
+def strategy_home():
+    return render_template("strategy.html")
 
 
 @app.route("/api/status")

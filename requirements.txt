@@ -1,3 +1,5 @@
 Flask
 python-chess
 gunicorn
+requestspython
+requests>=2.31.0

@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My account | ChessArenaX</title>
+<style>:root{--navy:#172033;--gold:#f7d66f;--bg:#f6f8fb;--muted:#667085;--line:#e3e7ee}*{box-sizing:border-box}body{margin:0;background:var(--bg);font:16px Arial,sans-serif;color:var(--navy)}header{background:var(--navy);color:white;padding:20px}.brand{font-size:1.4rem;font-weight:900}.brand span{color:var(--gold)}main{max-width:760px;margin:30px auto;padding:0 16px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;margin:14px 0}.muted{color:var(--muted);line-height:1.5}.btn{display:inline-block;text-decoration:none;border:0;border-radius:8px;background:var(--gold);color:var(--navy);padding:11px 14px;font-weight:800;cursor:pointer}.secondary{background:#eef1f6}.success{background:#e9f8ef;padding:12px;border-radius:8px}.notice{padding:12px;background:#fff8df;border-radius:8px}</style></head>
+<body><header><div class="brand">ChessArena<span>X</span></div><div style="color:#d5d9e2;margin-top:5px">Account and purchases</div></header>
+<main><a href="/" style="color:inherit">← Back to Academy</a>
+{% for category, message in get_flashed_messages(with_categories=true) %}<p class="notice">{{ message }}</p>{% endfor %}
+<section class="card"><h1>My account</h1><p class="muted">Signed in as <strong>{{ user.email }}</strong></p>
+{% if premium %}<div class="success"><strong>Strategy Lab Premium is active.</strong><br>You can access all currently available premium lessons.</div><p><a class="btn" href="{{ url_for('strategy.strategy_home') }}">Open Strategy Lab →</a></p>
+{% else %}<p class="muted">You do not have a confirmed Strategy Lab Premium purchase on this account yet.</p><p><a class="btn" href="{{ url_for('strategy.strategy_home') }}">View Strategy Lab</a></p>{% endif %}
+<form method="post" action="{{ url_for('account.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary" type="submit">Sign out</button></form></section>
+<section class="card"><h2>Purchase history</h2>{% if orders %}<ul>{% for order in orders %}<li>Order {{ order.order_id }} — {{ order.status }} — {{ order.created_at }}</li>{% endfor %}</ul>{% else %}<p class="muted">No confirmed purchases recorded yet.</p>{% endif %}<p class="muted">Payment confirmation may take a short time after checkout. Refresh this page if you have just paid.</p></section>
+</main></body></html>
