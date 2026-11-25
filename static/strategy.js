@@ -1,346 +1,239 @@
+const PIECES = {
+  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
+  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟"
+};
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
-(() => {
-  "use strict";
+let currentLesson = null;
+let exIndex = 0;
+let selectedSq = null;
+let draggedSq = null;
+let lastMoveUci = null;
+let lastSubmittedMove = null; // { fromSq, toSq, piece }
+
+function parseBoard(fen) {
+  const placement = fen.split(" ")[0].split("/");
+  const map = {};
+  for (let r = 0; r < 8; r++) {
+    let f = 0;
+    for (const ch of placement[r]) {
+      if (/[1-8]/.test(ch)) {
+        f += parseInt(ch, 10);
+      } else {
+        const sq = FILES[f] + (8 - r);
+        map[sq] = ch;
+        f++;
+      }
+    }
+  }
+  return map;
+}
+
+function getDisplayPosition(ex) {
+  const pos = parseBoard(ex.fen);
+  if (lastSubmittedMove && pos[lastSubmittedMove.fromSq]) {
+    const movingPiece = pos[lastSubmittedMove.fromSq];
+    delete pos[lastSubmittedMove.fromSq];
+    pos[lastSubmittedMove.toSq] = movingPiece;
+  }
+  return pos;
+}
+
+function renderCoordinates(flipped) {
+  const ranks = flipped ? [1, 2, 3, 4, 5, 6, 7, 8] : [8, 7, 6, 5, 4, 3, 2, 1];
+  const files = flipped ? [...FILES].reverse() : FILES;
+
+  document.getElementById("ranks").innerHTML = ranks.map(r => `<div>${r}</div>`).join("");
+  document.getElementById("files").innerHTML = files.map(f => `<div>${f}</div>`).join("");
+  return { ranks, files };
+}
+
+function renderBoard() {
+  const ex = currentLesson.exercises[exIndex];
+  const pos = getDisplayPosition(ex);
+  const flipped = ex.orientation === "black";
+  const { ranks, files } = renderCoordinates(flipped);
+
+  const fromSq = lastMoveUci ? lastMoveUci.slice(0, 2) : null;
+  const toSq = lastMoveUci ? lastMoveUci.slice(2, 4) : null;
 
   const boardEl = document.getElementById("board");
-  const titleEl = document.getElementById("lesson-title");
-  const metaEl = document.getElementById("lesson-meta");
-  const promptEl = document.getElementById("lesson-prompt");
-  const feedbackEl = document.getElementById("feedback");
+  boardEl.innerHTML = "";
 
-  const submitBtn = document.getElementById("submit-move");
-  const resetBtn = document.getElementById("reset-position");
-  const clearBtn = document.getElementById("clear-selection");
+  ranks.forEach((rk, rIdx) => {
+    files.forEach((fl, fIdx) => {
+      const sq = fl + rk;
+      const isLight = (rIdx + fIdx) % 2 === 0;
+      const piece = pos[sq];
 
-  let game = null;
-  let board = null;
+      const div = document.createElement("div");
+      div.className = `sq ${isLight ? "light" : "dark"}`;
+      div.dataset.sq = sq;
+      if (selectedSq === sq) div.classList.add("selected");
+      if (sq === fromSq || sq === toSq) div.classList.add("last-move");
 
-  let currentLesson = 1;
-  let startingFen = null;
+      if (piece) {
+        const pieceSpan = document.createElement("span");
+        pieceSpan.className = "piece-span " + (piece === piece.toUpperCase() ? "piece-white" : "piece-black");
+        pieceSpan.textContent = PIECES[piece];
+        pieceSpan.draggable = true;
 
-  let selected = null;
-  let legalTargets = [];
-  let selectedMove = null;
+        pieceSpan.addEventListener("dragstart", (e) => {
+          draggedSq = sq;
+          selectedSq = sq;
+          e.dataTransfer.setData("text/plain", sq);
+          e.dataTransfer.effectAllowed = "move";
+        });
 
-  function say(text, kind = "") {
-    feedbackEl.textContent = text;
-    feedbackEl.className =
-      "feedback" + (kind ? " " + kind : "");
-  }
+        pieceSpan.addEventListener("dragend", () => {
+          draggedSq = null;
+          document.querySelectorAll(".sq.drag-over").forEach(el => el.classList.remove("drag-over"));
+        });
 
-  // Highlight selected square and legal destinations.
-  function updateHighlights() {
-    boardEl.querySelectorAll("[data-square]").forEach(square => {
-      const name = square.getAttribute("data-square");
-
-      square.classList.remove(
-        "strategy-selected",
-        "strategy-target",
-        "strategy-capture"
-      );
-
-      if (name === selected) {
-        square.classList.add("strategy-selected");
+        div.appendChild(pieceSpan);
       }
 
-      if (legalTargets.includes(name)) {
-        square.classList.add("strategy-target");
-
-        if (game.get(name)) {
-          square.classList.add("strategy-capture");
-        }
-      }
-    });
-  }
-
-  function clearMoveSelection() {
-    selected = null;
-    legalTargets = [];
-    selectedMove = null;
-
-    submitBtn.disabled = true;
-
-    updateHighlights();
-  }
-
-  // Save a successfully made move for server-side checking.
-  
-  function finishMove(move, syncBoard = true) {
-    selectedMove = {
-        from: move.from,
-        to: move.to,
-        promotion: move.promotion || ""
-    };
-
-    selected = null;
-    legalTargets = [];
-
-    submitBtn.disabled = false;
-
-    // Synchronize without animation to prevent duplicate movement.
-    if (syncBoard) {
-        board.position(game.fen(), false);
-    }
-
-    updateHighlights();
-
-    say(
-        "Move selected: " + move.san +
-        ". Submit it to check your decision."
-    );
-}
-
-  // DRAGGING: prevent dragging the opponent's pieces.
-  function onDragStart(source, piece) {
-    if (!game) return false;
-    if (game.game_over()) return false;
-    if (piece[0] !== game.turn()) return false;
-
-    clearMoveSelection();
-
-    return true;
-}
-
-  // DRAGGING: validate and process the move.
-  function onDrop(source, target) {
-    if (!game) return "snapback";
-
-    const move = game.move({
-        from: source,
-        to: target,
-        promotion: "q"
-    });
-
-    if (!move) {
-        return "snapback";
-    }
-
-    finishMove(move, false);
-}
-
-
-  // Keep the displayed board synchronized with chess.js.
- function onSnapEnd() {
-    if (game) {
-        board.position(game.fen(), false);
-        updateHighlights();
-    }
-}
-
-  // CLICKING: select a piece, then click its destination.
-  function onSquareClick(square) {
-    if (!game) return;
-
-    const piece = game.get(square);
-
-    // A destination square was clicked.
-    if (selected && legalTargets.includes(square)) {
-      const move = game.move({
-        from: selected,
-        to: square,
-        promotion: "q"
+      div.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        div.classList.add("drag-over");
       });
 
-      if (move) {
-        finishMove(move);
-        return;
-      }
-    }
+      div.addEventListener("dragleave", () => {
+        div.classList.remove("drag-over");
+      });
 
-    // Select a piece belonging to the side to move.
-    if (piece && piece.color === game.turn()) {
-      selected = square;
-
-      legalTargets = game.moves({
-        square: square,
-        verbose: true
-      }).map(move => move.to);
-
-      selectedMove = null;
-      submitBtn.disabled = true;
-
-      updateHighlights();
-
-      say("Choose a highlighted destination square.");
-      return;
-    }
-
-    clearMoveSelection();
-
-    say("Select one of your pieces, then choose a legal destination.");
-  }
-
-  // Listen for clicks on chessboard.js squares.
-  boardEl.addEventListener("click", event => {
-    const squareElement = event.target.closest("[data-square]");
-
-    if (!squareElement) return;
-
-    const square = squareElement.getAttribute("data-square");
-
-    onSquareClick(square);
-  });
-
-  async function loadLesson(id) {
-    say("Loading lesson…");
-
-    try {
-      const response = await fetch(
-        "/api/strategy/lesson/" + id
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Could not load this lesson."
-        );
-      }
-
-      currentLesson = id;
-      startingFen = data.fen;
-
-      game = new Chess(startingFen);
-
-      clearMoveSelection();
-
-      titleEl.textContent = data.title;
-
-      metaEl.textContent =
-        "Lesson " + data.id +
-        " · " + data.level +
-        " · " + data.theme;
-
-      promptEl.textContent = data.prompt;
-
-      board.position(game.fen());
-
-      updateHighlights();
-
-      say("Select a legal move using either dragging or clicking.");
-    } catch (err) {
-      say(err.message, "bad");
-    }
-  }
-
-  // Submit the selected move to Flask.
-  submitBtn.addEventListener("click", async () => {
-    if (!selectedMove) return;
-
-    const uci =
-      selectedMove.from +
-      selectedMove.to +
-      selectedMove.promotion;
-
-    submitBtn.disabled = true;
-
-    try {
-      const response = await fetch(
-        "/api/strategy/answer",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            lesson_id: currentLesson,
-            move_uci: uci
-          })
+      div.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        div.classList.remove("drag-over");
+        const fromSquare = draggedSq || e.dataTransfer.getData("text/plain");
+        draggedSq = null;
+        if (!fromSquare || fromSquare === sq) {
+          selectedSq = null;
+          renderBoard();
+          return;
         }
-      );
+        await commitMove(fromSquare, sq);
+      });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Could not check this move."
-        );
-      }
-
-      document.getElementById("score").textContent =
-        data.score;
-
-      document.getElementById("attempts").textContent =
-        data.attempts;
-
-      document.getElementById("accuracy").textContent =
-        data.accuracy + "%";
-
-      say(
-        (data.correct
-          ? "Correct! "
-          : "Not the target move. Your move: " +
-            data.chosen_san +
-            ". Suggested move: " +
-            data.correct_san + ". ") +
-        data.explanation + " " + data.why_not,
-
-        data.correct ? "good" : "bad"
-      );
-
-    } catch (err) {
-      say(err.message, "bad");
-    }
-
-    clearMoveSelection();
-  });
-
-  // Reset the current position.
-  resetBtn.addEventListener("click", () => {
-    if (!startingFen) return;
-
-    game = new Chess(startingFen);
-
-    board.position(game.fen());
-
-    clearMoveSelection();
-
-    say("Position reset. Try again.");
-  });
-
-  // Clear current selection.
-  clearBtn.addEventListener("click", () => {
-    clearMoveSelection();
-
-    say("Selection cleared.");
-  });
-
-  // Load lessons.
-  document.querySelectorAll(".load-lesson").forEach(btn => {
-    btn.addEventListener("click", () => {
-      loadLesson(Number(btn.dataset.lesson));
+      div.addEventListener("click", () => onSquareClick(sq));
+      boardEl.appendChild(div);
     });
   });
+}
 
-  // Check required libraries.
-  if (
-    typeof Chess === "undefined" ||
-    typeof Chessboard === "undefined"
-  ) {
-    say(
-      "Chessboard libraries could not load. Check your internet connection.",
-      "bad"
-    );
+function resetSelection() {
+  selectedSq = null;
+  draggedSq = null;
+  lastSubmittedMove = null;
+  lastMoveUci = null;
+  renderBoard();
+}
+
+function showHint() {
+  const ex = currentLesson.exercises[exIndex];
+  const fb = document.getElementById("feedback");
+  fb.className = "feedback try-again";
+  fb.innerHTML = `<strong>Hint:</strong> ${ex.hint}`;
+}
+
+async function onSquareClick(sq) {
+  if (!selectedSq) {
+    selectedSq = sq;
+    renderBoard();
+    return;
+  }
+  if (selectedSq === sq) {
+    selectedSq = null;
+    renderBoard();
+    return;
+  }
+  const fromSquare = selectedSq;
+  selectedSq = null;
+  await commitMove(fromSquare, sq);
+}
+
+async function commitMove(fromSquare, toSquare) {
+  const uci = fromSquare + toSquare;
+  lastSubmittedMove = { fromSq: fromSquare, toSq: toSquare };
+  lastMoveUci = uci;
+  renderBoard();
+  await submitMove(uci);
+}
+
+async function submitMove(moveUci) {
+  const res = await fetch("/api/strategy/answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      lesson_id: currentLesson.id,
+      exercise_index: exIndex,
+      move_uci: moveUci
+    })
+  });
+  const data = await res.json();
+  const fb = document.getElementById("feedback");
+
+  if (data.error) {
+    lastSubmittedMove = null;
+    lastMoveUci = null;
+    renderBoard();
+    fb.className = "feedback try-again";
+    fb.textContent = data.error;
     return;
   }
 
-  // Create the board using the same piece images as Openings.
-  board = Chessboard("board", {
-    position: "start",
-    draggable: true,
+  document.getElementById("stat-score").textContent = data.score;
+  document.getElementById("stat-acc").textContent = `${data.accuracy}%`;
 
-    pieceTheme:
-      "https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png",
+  if (data.correct) {
+    fb.className = "feedback ok";
+    fb.innerHTML = `<strong>${data.chosen_san} — Nice move!</strong><br>${data.explanation}<br><em>Next plan:</em> ${data.plan}`;
+  } else {
+    fb.className = "feedback try-again";
+    fb.innerHTML = `<strong>${data.chosen_san} — Not quite.</strong><br>${data.explanation}<br><em>Hint:</em> ${data.plan}`;
+  }
+}
 
-    onDragStart: onDragStart,
-    onDrop: onDrop,
-    onSnapEnd: onSnapEnd
+function selectExercise(idx) {
+  exIndex = idx;
+  selectedSq = null;
+  draggedSq = null;
+  lastSubmittedMove = null;
+  lastMoveUci = null;
+  document.getElementById("tab-0").classList.toggle("active", idx === 0);
+  document.getElementById("tab-1").classList.toggle("active", idx === 1);
+
+  const ex = currentLesson.exercises[exIndex];
+  document.getElementById("ex-focus").textContent = `${ex.focus} · ${ex.side} to move`;
+  document.getElementById("ex-prompt").textContent = ex.prompt;
+
+  const fb = document.getElementById("feedback");
+  fb.className = "feedback";
+  fb.textContent = "Drag a piece to a square, or click a piece and click its destination square.";
+  renderBoard();
+}
+
+async function loadLesson(id) {
+  document.querySelectorAll(".lesson-btn").forEach(b => {
+    b.classList.toggle("active", Number(b.dataset.id) === id);
   });
+  const res = await fetch(`/api/strategy/lesson/${id}`);
+  currentLesson = await res.json();
 
-  window.addEventListener("resize", () => {
-    board.resize();
-  });
+  document.getElementById("l-title").textContent = `${currentLesson.id}. ${currentLesson.title}`;
+  document.getElementById("l-meta").textContent = `${currentLesson.level} · ${currentLesson.theme} · ${currentLesson.minutes}`;
+  document.getElementById("l-obj").textContent = currentLesson.objective;
+  document.getElementById("l-learn").innerHTML = currentLesson.learn
+    .map(([k, v]) => `<li><strong>${k}:</strong> ${v}</li>`)
+    .join("");
+  document.getElementById("l-check").innerHTML = currentLesson.checklist
+    .map(c => `<li>${c}</li>`)
+    .join("");
+  document.getElementById("l-takeaway").textContent = currentLesson.takeaway;
 
-  loadLesson(1);
+  selectExercise(0);
+}
 
-})();
+const initialLessonId = Number(document.body.dataset.initialLesson || 1);
+loadLesson(initialLessonId);

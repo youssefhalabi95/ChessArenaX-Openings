@@ -53,7 +53,7 @@ If you already registered `strategy_bp`, do not register it a second time. Ensur
 3) SET LOCAL ENVIRONMENT VARIABLES (PowerShell)
 Generate a long random secret. For a quick local test, in the VS Code PowerShell terminal:
 
-    $env:SECRET_KEY = "replace-this-with-a-long-random-secret"
+    $env:SECRET_KEY = "Chess_101_102_103"
     $env:COOKIE_SECURE = "0"
     $env:SITE_URL = "http://127.0.0.1:5000"
     python app.py

@@ -18,10 +18,8 @@ if not app.config["SECRET_KEY"]:
         raise RuntimeError("Set the SECRET_KEY environment variable before starting ChessArenaX.")
 
 from auth_payment import account_bp, init_account_db
-from strategy_room import strategy_bp
 
 app.register_blueprint(account_bp)
-app.register_blueprint(strategy_bp)
 
 init_account_db()
 
@@ -528,6 +526,9 @@ def home():
         variation_count=sum(len(o.get("variations", [])) for o in OPENINGS)
     )
 
+@app.route("/privacy")
+def privacy_policy():
+    return render_template("privacy.html")
 
 @app.route("/openings")
 def openings_home():
